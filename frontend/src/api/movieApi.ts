@@ -41,6 +41,7 @@ function normalizeEpisode(episode: EpisodeItem): EpisodeItem {
     link_embed: backendUrl(episode.link_embed) || episode.link_embed,
     link_m3u8: backendUrl(episode.link_m3u8),
     fallback_embed: backendUrl(episode.fallback_embed) || episode.fallback_embed,
+    proxied_embed: backendUrl(episode.proxied_embed) || episode.proxied_embed,
   };
 }
 

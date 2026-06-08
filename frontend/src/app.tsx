@@ -1071,7 +1071,7 @@ function HlsVideoPlayer({
 
     function switchToIframeFallback(message: string) {
       setHlsError(message);
-      if (episode.link_embed || episode.fallback_embed || episode.source_url) {
+      if (episode.proxied_embed || episode.link_embed || episode.fallback_embed || episode.source_url) {
         setUseIframeFallback(true);
       }
     }
@@ -1119,7 +1119,7 @@ function HlsVideoPlayer({
 
 
   if (!episode.link_m3u8 || useIframeFallback) {
-    const fallbackUrl = episode.link_embed || episode.fallback_embed || episode.source_url;
+    const fallbackUrl = episode.proxied_embed || episode.link_embed || episode.fallback_embed || episode.source_url;
     const showIframeFallback = iframeTimedOut && !iframeDismissed && episode.link_embed.includes("/api/hhkungfu/player");
 
     return (
