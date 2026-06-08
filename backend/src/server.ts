@@ -2163,6 +2163,75 @@ function rewriteM3u8PlaylistWithProxy(playlist: string, baseUrl: URL, proxyUrl: 
     .join("\n");
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>'"]/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "'": "&#39;",
+      '"': "&quot;",
+    };
+    return entities[character] || character;
+  });
+}
+
+function webPlayerDocument(params: { title: string; src: string; poster?: string }) {
+  const title = escapeHtml(params.title || "TSVERSE Player");
+  const src = escapeHtml(params.src);
+  const poster = params.poster ? ` poster="${escapeHtml(params.poster)}"` : "";
+
+  return `<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${title}</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;background:#020617;color:#fff;font-family:Inter,system-ui,Arial,sans-serif;overflow:hidden}
+    .player{position:fixed;inset:0;display:grid;background:#000}
+    video{width:100%;height:100%;object-fit:contain;background:#000}
+    .status{position:fixed;left:16px;right:16px;bottom:16px;z-index:2;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.86);color:#e5e7eb;font-size:14px;line-height:1.45;backdrop-filter:blur(12px)}
+    .status:empty{display:none}
+  </style>
+</head>
+<body>
+  <main class="player">
+    <video id="video" controls autoplay playsinline${poster}></video>
+    <div id="status" class="status">Đang tải nguồn phát...</div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+  <script>
+    const source = ${JSON.stringify(params.src)};
+    const video = document.getElementById("video");
+    const status = document.getElementById("status");
+    const setStatus = (value) => { status.textContent = value || ""; };
+
+    if (!source) {
+      setStatus("Thiếu nguồn phát.");
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = source;
+      setStatus("");
+    } else if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setStatus("");
+        video.play().catch(() => undefined);
+      });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) setStatus("Không thể phát nguồn HLS hiện tại.");
+      });
+      hls.loadSource(source);
+      hls.attachMedia(video);
+    } else {
+      video.src = source;
+      setStatus("Trình duyệt không hỗ trợ HLS.js.");
+    }
+  </script>
+</body>
+</html>`;
+}
+
 const hhkungfuVercelSafeUrlLength = 7500;
 const hhkungfuLongPlaylistUnwrapLimit = 3;
 
@@ -3098,16 +3167,17 @@ app.get("/api/episodes/:episodeId", async (request, response) => {
     const resolvedDirectSource = hlsFallback ? null : await resolveHhkungfuDirectSource(episodeParams);
     const directEmbed = resolvedDirectSource?.playerType === "iframe" ? resolvedDirectSource.url : parseIframeSrc(resolvedDirectSource?.playerHtml || "");
     const proxiedEmbed = streamfreeProxyUrl(directEmbed);
-    const canResolveEmbedHls = Boolean(streamExtractorUrl && (proxiedEmbed || directEmbed));
+    const canResolveEmbedHls = Boolean(streamExtractorUrl && directEmbed);
     const hasPlayableDirectHls = Boolean(resolvedDirectSource?.playerType === "hls" && !isStreamfreeMediaUrl(resolvedDirectSource.url));
-    const hasHls = Boolean(hlsFallback || hasPlayableDirectHls);
+    const hasHls = Boolean(hlsFallback || hasPlayableDirectHls || canResolveEmbedHls);
+    const shouldUseHhkungfuHls = !hlsFallback && (hasPlayableDirectHls || canResolveEmbedHls);
     const hhkungfuHls = hhkungfuHlsUrl(
       request.params.episodeId,
-      !hlsFallback && hasPlayableDirectHls ? "hhkungfu" : undefined,
-      !hlsFallback && hasPlayableDirectHls && canResolveEmbedHls
+      shouldUseHhkungfuHls ? "hhkungfu" : undefined,
+      shouldUseHhkungfuHls && directEmbed
         ? {
           embed: directEmbed,
-          referer: resolvedDirectSource?.referer,
+          referer: resolvedDirectSource?.referer || hhkungfuBaseUrl,
         }
         : {},
     );
@@ -3229,6 +3299,30 @@ app.get("/api/hhkungfu/player-frame", (request, response) => {
   }
 
   response.type("text/html").send(iframePlayerDocument(embedUrl));
+});
+
+app.get(["/player", "/web-player", "/tserver/player"], (request, response) => {
+  const src = String(request.query.src || request.query.url || "").trim();
+  const title = String(request.query.title || "TSVERSE Player").trim();
+  const poster = String(request.query.poster || "").trim();
+
+  if (!src) {
+    response.status(400).type("text/plain").send("Missing player src");
+    return;
+  }
+
+  response.setHeader("cache-control", "no-store");
+  response.type("text/html").send(webPlayerDocument({ title, src, poster: poster || undefined }));
+});
+
+app.get(["/player/:episodeId", "/web-player/:episodeId", "/tserver/player/:episodeId"], (request, response) => {
+  const title = String(request.query.title || "TSVERSE Player").trim();
+  const poster = String(request.query.poster || "").trim();
+  const source = String(request.query.source || "").trim();
+  const src = hhkungfuHlsUrl(String(request.params.episodeId), source || undefined);
+
+  response.setHeader("cache-control", "no-store");
+  response.type("text/html").send(webPlayerDocument({ title, src, poster: poster || undefined }));
 });
 
 app.get("/api/hhkungfu/hls/:episodeId", async (request, response) => {
