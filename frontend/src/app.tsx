@@ -835,6 +835,7 @@ function HlsVideoPlayer({
   const [iframeTimedOut, setIframeTimedOut] = useState(false);
   const [iframeDismissed, setIframeDismissed] = useState(false);
   const [iframeReloadKey, setIframeReloadKey] = useState(0);
+  const [useIframeFallback, setUseIframeFallback] = useState(false);
   const cutRanges = useMemo(() => normalizeCutRanges(episode.cut_ranges), [episode.cut_ranges]);
 
 
@@ -1064,8 +1065,16 @@ function HlsVideoPlayer({
     const video = videoRef.current;
     const source = episode.link_m3u8;
     setHlsError("");
+    setUseIframeFallback(false);
 
     if (!video || !source) return undefined;
+
+    function switchToIframeFallback(message: string) {
+      setHlsError(message);
+      if (episode.link_embed || episode.fallback_embed || episode.source_url) {
+        setUseIframeFallback(true);
+      }
+    }
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -1075,26 +1084,28 @@ function HlsVideoPlayer({
       hls.loadSource(source);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) setHlsError("Không thể phát HLS, đang chuyển sang player dự phòng.");
+        if (data.fatal) switchToIframeFallback("HLS khong phat duoc, dang chuyen sang player du phong.");
       });
       return () => hls.destroy();
     }
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const handleVideoError = () => switchToIframeFallback("HLS khong phat duoc, dang chuyen sang player du phong.");
       video.src = source;
-    } else {
-      setHlsError("Trình duyệt không hỗ trợ HLS.");
+      video.addEventListener("error", handleVideoError, { once: true });
+      return () => video.removeEventListener("error", handleVideoError);
     }
 
+    switchToIframeFallback("Trinh duyet khong ho tro HLS.");
     return undefined;
-  }, [episode.link_m3u8]);
+  }, [episode.fallback_embed, episode.link_embed, episode.link_m3u8, episode.source_url]);
 
   useEffect(() => {
     setIframeTimedOut(false);
     setIframeDismissed(false);
     iframeLoadedRef.current = false;
 
-    if (episode.link_m3u8 || !episode.link_embed.includes("/api/hhkungfu/player")) {
+    if ((episode.link_m3u8 && !useIframeFallback) || !episode.link_embed.includes("/api/hhkungfu/player")) {
       return undefined;
     }
 
@@ -1103,16 +1114,17 @@ function HlsVideoPlayer({
     }, 14000);
 
     return () => window.clearTimeout(timer);
-  }, [episode.link_embed, episode.link_m3u8, iframeReloadKey]);
+  }, [episode.link_embed, episode.link_m3u8, iframeReloadKey, useIframeFallback]);
 
 
 
-  if (!episode.link_m3u8) {
+  if (!episode.link_m3u8 || useIframeFallback) {
     const fallbackUrl = episode.link_embed || episode.fallback_embed || episode.source_url;
     const showIframeFallback = iframeTimedOut && !iframeDismissed && episode.link_embed.includes("/api/hhkungfu/player");
 
     return (
       <div className="iframe-player">
+        {hlsError ? <div className="player-source-note">{hlsError}</div> : null}
         <iframe
           key={iframeReloadKey}
           ref={iframeRef}

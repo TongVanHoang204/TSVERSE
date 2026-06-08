@@ -25,6 +25,7 @@ const BLOCKED_TAXONOMY_NAMES = ["18+", "Miền Tây", "Trẻ Em"];
 function absoluteImageUrl(url?: string, cdn = DEFAULT_IMAGE_CDN) {
   if (!url) return url;
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (/^[\w.-]+\//.test(url)) return `https://${url}`;
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   return `${cdn}${cleanUrl}`;
 }
