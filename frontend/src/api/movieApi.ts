@@ -36,12 +36,15 @@ function backendUrl(url?: string) {
 }
 
 function normalizeEpisode(episode: EpisodeItem): EpisodeItem {
+  const proxiedEmbed = backendUrl(episode.proxied_embed) || episode.proxied_embed;
+  const shouldPreferStreamfreeEmbed = Boolean(proxiedEmbed?.includes("/api/streamfree/") && episode.link_m3u8?.includes("/api/hhkungfu/hls/"));
+
   return {
     ...episode,
     link_embed: backendUrl(episode.link_embed) || episode.link_embed,
-    link_m3u8: backendUrl(episode.link_m3u8),
+    link_m3u8: shouldPreferStreamfreeEmbed ? undefined : backendUrl(episode.link_m3u8),
     fallback_embed: backendUrl(episode.fallback_embed) || episode.fallback_embed,
-    proxied_embed: backendUrl(episode.proxied_embed) || episode.proxied_embed,
+    proxied_embed: proxiedEmbed,
   };
 }
 
