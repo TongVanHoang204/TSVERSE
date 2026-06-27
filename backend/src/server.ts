@@ -1421,6 +1421,14 @@ function hhkungfuListResponse(source: HhkungfuSource, posts: HhpandaPost[], page
   };
 }
 
+async function fetchHhkungfuLatestPosts(page: number, limit: number) {
+  return fetchHhkungfuJson<HhpandaPost[]>("/wp-json/wp/v2/posts", {
+    page,
+    per_page: limit,
+    _embed: 1,
+  });
+}
+
 function slugFromHhkungfuUrl(url: string) {
   const pathname = new URL(url).pathname;
   return pathname.split("/").filter(Boolean)[0] || "";
@@ -2645,29 +2653,15 @@ app.get("/api/movies/latest", async (request, response) => {
     if (requestWantsAllSources(request)) {
       const [hhkungfuResult, animehayResult] = await Promise.allSettled([
         (async () => {
-          let html = await fetchHhkungfuText(hhkungfuLatestPagePath(page));
-          const itemsBySlug = new Map<string, ReturnType<typeof parseHhkungfuLatestMovies>[number]>();
-
-          for (const item of parseHhkungfuLatestMovies(html, limit)) {
-            if (!item) continue;
-            itemsBySlug.set(item.slug, item);
-          }
-
-          let nextPage = page + 1;
-          while (itemsBySlug.size < limit && nextPage <= page + 3) {
-            const nextHtml = await fetchHhkungfuText(hhkungfuLatestPagePath(nextPage));
-            for (const item of parseHhkungfuLatestMovies(nextHtml, limit)) {
-              if (!item) continue;
-              if (!itemsBySlug.has(item.slug)) itemsBySlug.set(item.slug, item);
-              if (itemsBySlug.size >= limit) break;
-            }
-            html = `${html}${nextHtml}`;
-            nextPage += 1;
-          }
-
+          const result = await fetchHhkungfuLatestPosts(page, limit);
           return {
-            items: Array.from(itemsBySlug.values()).slice(0, limit),
-            pagination: parseHhkungfuPagination(html, page, itemsBySlug.size),
+            items: result.data.map(normalizeHhkungfuPost),
+            pagination: {
+              totalItems: result.total || result.data.length,
+              totalItemsPerPage: result.data.length,
+              currentPage: page,
+              totalPages: result.totalPages || 1,
+            },
           };
         })(),
         (async () => {
@@ -2728,27 +2722,11 @@ app.get("/api/movies/latest", async (request, response) => {
       return;
     }
 
-    let html = await fetchHhkungfuText(hhkungfuLatestPagePath(page));
-    const itemsBySlug = new Map<string, ReturnType<typeof parseHhkungfuLatestMovies>[number]>();
-
-    for (const item of parseHhkungfuLatestMovies(html, limit)) {
-      if (!item) continue;
-      itemsBySlug.set(item.slug, item);
-    }
-
-    let nextPage = page + 1;
-    while (itemsBySlug.size < limit && nextPage <= page + 3) {
-      const nextHtml = await fetchHhkungfuText(hhkungfuLatestPagePath(nextPage));
-      for (const item of parseHhkungfuLatestMovies(nextHtml, limit)) {
-        if (!item) continue;
-        if (!itemsBySlug.has(item.slug)) itemsBySlug.set(item.slug, item);
-        if (itemsBySlug.size >= limit) break;
-      }
-      html = `${html}${nextHtml}`;
-      nextPage += 1;
-    }
-
-    response.json(hhkungfuLatestResponse(Array.from(itemsBySlug.values()).slice(0, limit), html, page));
+    const result = await fetchHhkungfuLatestPosts(page, limit);
+    response.json({
+      ...hhkungfuListResponse("hh3d", result.data, page, result.total, result.totalPages),
+      source: "HHKUNGFU",
+    });
   } catch (error) {
     response.status(502).json({
       status: false,
