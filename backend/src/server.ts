@@ -3224,18 +3224,8 @@ app.get("/api/phimapi/hls/:episodeId", async (request, response) => {
     }
 
     const url = assertAllowedPhimApiMediaUrl(m3u8Url);
-    const result = await fetch(url, {
-      headers: {
-        accept: "application/vnd.apple.mpegurl,*/*",
-        referer: upstreamBaseUrl,
-        "user-agent": "Mozilla/5.0 (compatible; TSVERSE/0.1)",
-      },
-    });
-
-    if (!result.ok) throw new Error(`PhimAPI HLS returned ${result.status}`);
-    const playlist = await result.text();
-    response.setHeader("cache-control", "no-store");
-    response.type("application/vnd.apple.mpegurl").send(rewriteM3u8PlaylistWithProxy(playlist, url, phimApiHlsProxyUrl));
+    response.setHeader("cache-control", "public, max-age=300");
+    response.redirect(302, String(url));
   } catch (error) {
     response.status(502).type("text/plain").send(errorDetail(error) || "Cannot load PhimAPI HLS");
   }
@@ -3332,20 +3322,9 @@ app.get("/api/hhkungfu/hls/:episodeId", async (request, response) => {
 
       try {
         const url = assertAllowedPhimApiMediaUrl(m3u8Url);
-        const referer = candidate.source === "OPhim" || url.hostname.includes("opstream") ? oPhimBaseUrl : upstreamBaseUrl;
-        const result = await fetch(url, {
-          headers: {
-            accept: "application/vnd.apple.mpegurl,*/*",
-            referer,
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-          },
-        });
-
-        if (!result.ok) continue;
-        const playlist = await result.text();
-        response.setHeader("cache-control", "no-store");
+        response.setHeader("cache-control", "public, max-age=300");
         response.setHeader("x-hls-source", candidate.source.toLowerCase());
-        response.type("application/vnd.apple.mpegurl").send(rewriteM3u8PlaylistWithProxy(playlist, url, phimApiHlsProxyUrl));
+        response.redirect(302, String(url));
         return true;
       } catch {
         continue;
