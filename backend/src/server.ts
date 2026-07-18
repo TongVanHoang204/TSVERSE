@@ -1606,7 +1606,7 @@ async function resolveAllHhkungfuPhimApiHlsCandidates(episode: { postId: string;
   for (const source of sources) {
     const details = await resolveMovieApiDetailCandidatesForHhkungfuPost(postResult.data, source.baseUrl);
     for (const detail of details) {
-      if (!detail.episodes?.length) continue;
+      if (!detail.movie || !detail.episodes?.length) continue;
 
       for (const server of preferredPhimApiServers(detail.episodes)) {
         const data = server.server_data || [];
