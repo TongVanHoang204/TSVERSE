@@ -3240,11 +3240,12 @@ app.get("/api/phimapi/hls-proxy", async (request, response) => {
 
   try {
     const url = assertAllowedPhimApiMediaUrl(rawUrl);
+    const referer = url.hostname.includes("opstream") ? oPhimBaseUrl : upstreamBaseUrl;
     const result = await fetch(url, {
       headers: {
         accept: "*/*",
-        referer: upstreamBaseUrl,
-        "user-agent": "Mozilla/5.0 (compatible; TSVERSE/0.1)",
+        referer,
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
       },
     });
 
@@ -3317,11 +3318,12 @@ app.get("/api/hhkungfu/hls/:episodeId", async (request, response) => {
     if (!m3u8Url) return false;
 
     const url = assertAllowedPhimApiMediaUrl(m3u8Url);
+    const referer = resolved?.source === "OPhim" || url.hostname.includes("opstream") ? oPhimBaseUrl : upstreamBaseUrl;
     const result = await fetch(url, {
       headers: {
         accept: "application/vnd.apple.mpegurl,*/*",
-        referer: upstreamBaseUrl,
-        "user-agent": "Mozilla/5.0 (compatible; TSVERSE/0.1)",
+        referer,
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
       },
     });
 
