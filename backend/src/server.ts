@@ -3327,7 +3327,7 @@ app.get("/api/hhkungfu/hls/:episodeId", async (request, response) => {
       },
     });
 
-    if (!result.ok) throw new Error(`PhimAPI HLS returned ${result.status}`);
+    if (!result.ok) throw new Error(`PhimAPI HLS (${m3u8Url}) returned ${result.status}`);
     const playlist = await result.text();
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-hls-source", "phimapi");
