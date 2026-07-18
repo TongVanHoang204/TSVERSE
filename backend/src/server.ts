@@ -3288,11 +3288,14 @@ app.get("/api/image-proxy", async (request, response) => {
       return;
     }
 
-    const referer = parsed.hostname.includes("animehay") ? animehayBaseUrl : parsed.hostname.includes("hhkungfu") ? hhkungfuBaseUrl : undefined;
+    const referer = `${parsed.protocol}//${parsed.hostname}/`;
     const res = await fetch(imageUrl, {
       headers: {
         accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        ...(referer ? { referer } : {}),
+        referer,
+        "sec-fetch-dest": "image",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-site": "same-origin",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
       },
     });
@@ -3304,6 +3307,12 @@ app.get("/api/image-proxy", async (request, response) => {
 
     const contentType = res.headers.get("content-type") || "image/jpeg";
     const bytes = Buffer.from(await res.arrayBuffer());
+
+    if (contentType.includes("json") || (bytes.length < 100 && bytes.toString("utf8").includes('"status":false'))) {
+      response.status(404).type("text/plain").send("Anti-bot blocked image");
+      return;
+    }
+
     response.setHeader("cache-control", "public, max-age=86400, s-maxage=86400");
     response.type(contentType).send(bytes);
   } catch (error) {
