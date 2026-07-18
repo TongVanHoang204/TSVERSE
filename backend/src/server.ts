@@ -1592,14 +1592,16 @@ async function resolveMovieApiDetailCandidatesForHhkungfuPost(post: HhpandaPost,
   return details;
 }
 
-async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: string }) {
+async function resolveAllHhkungfuPhimApiHlsCandidates(episode: { postId: string; chapter: string }) {
   const postResult = await fetchHhkungfuJson<HhpandaPost>(`/wp-json/wp/v2/posts/${episode.postId}`, {
     _embed: 1,
   });
   const sources = [
-    { name: "PhimAPI", baseUrl: upstreamBaseUrl },
     { name: "OPhim", baseUrl: oPhimBaseUrl },
+    { name: "PhimAPI", baseUrl: upstreamBaseUrl },
   ].filter((source, index, all) => all.findIndex((item) => item.baseUrl === source.baseUrl) === index);
+
+  const candidates: Array<{ source: string; movie: PhimApiMovie; server_name: string; episode: PhimApiEpisodeItem }> = [];
 
   for (const source of sources) {
     const details = await resolveMovieApiDetailCandidatesForHhkungfuPost(postResult.data, source.baseUrl);
@@ -1610,31 +1612,40 @@ async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: str
         const data = server.server_data || [];
         if (!data.length) continue;
 
+        let foundMatch = false;
         for (const item of data) {
           if (!item.link_m3u8 || !isSameEpisode(episode.chapter, item)) continue;
-          return {
+          candidates.push({
             source: source.name,
             movie: detail.movie,
             server_name: server.server_name || source.name,
             episode: item,
-          };
+          });
+          foundMatch = true;
         }
 
-        const isSpecialChapter = /full|ova|movie|dac-biet|dacbiet|spec/i.test(episode.chapter);
-        const fallbackItem = isSpecialChapter ? data[data.length - 1] : data[0];
-        if (fallbackItem?.link_m3u8) {
-          return {
-            source: source.name,
-            movie: detail.movie,
-            server_name: server.server_name || source.name,
-            episode: fallbackItem,
-          };
+        if (!foundMatch) {
+          const isSpecialChapter = /full|ova|movie|dac-biet|dacbiet|spec/i.test(episode.chapter);
+          const fallbackItem = isSpecialChapter ? data[data.length - 1] : data[0];
+          if (fallbackItem?.link_m3u8) {
+            candidates.push({
+              source: source.name,
+              movie: detail.movie,
+              server_name: server.server_name || source.name,
+              episode: fallbackItem,
+            });
+          }
         }
       }
     }
   }
 
-  return null;
+  return candidates;
+}
+
+async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: string }) {
+  const candidates = await resolveAllHhkungfuPhimApiHlsCandidates(episode);
+  return candidates[0] || null;
 }
 
 function slugFromHhkungfuUrl(url: string) {
@@ -3310,29 +3321,38 @@ app.get("/api/hhkungfu/hls/:episodeId", async (request, response) => {
   }
 
   const sendPhimApiFallback = async () => {
-    const resolved = await resolveHhkungfuPhimApiHls({
+    const candidates = await resolveAllHhkungfuPhimApiHlsCandidates({
       postId: String(episode.postId),
       chapter: String(episode.chapter),
     });
-    const m3u8Url = resolved?.episode.link_m3u8;
-    if (!m3u8Url) return false;
 
-    const url = assertAllowedPhimApiMediaUrl(m3u8Url);
-    const referer = resolved?.source === "OPhim" || url.hostname.includes("opstream") ? oPhimBaseUrl : upstreamBaseUrl;
-    const result = await fetch(url, {
-      headers: {
-        accept: "application/vnd.apple.mpegurl,*/*",
-        referer,
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      },
-    });
+    for (const candidate of candidates) {
+      const m3u8Url = candidate.episode.link_m3u8;
+      if (!m3u8Url) continue;
 
-    if (!result.ok) throw new Error(`PhimAPI HLS (${m3u8Url}) returned ${result.status}`);
-    const playlist = await result.text();
-    response.setHeader("cache-control", "no-store");
-    response.setHeader("x-hls-source", "phimapi");
-    response.type("application/vnd.apple.mpegurl").send(rewriteM3u8PlaylistWithProxy(playlist, url, phimApiHlsProxyUrl));
-    return true;
+      try {
+        const url = assertAllowedPhimApiMediaUrl(m3u8Url);
+        const referer = candidate.source === "OPhim" || url.hostname.includes("opstream") ? oPhimBaseUrl : upstreamBaseUrl;
+        const result = await fetch(url, {
+          headers: {
+            accept: "application/vnd.apple.mpegurl,*/*",
+            referer,
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          },
+        });
+
+        if (!result.ok) continue;
+        const playlist = await result.text();
+        response.setHeader("cache-control", "no-store");
+        response.setHeader("x-hls-source", candidate.source.toLowerCase());
+        response.type("application/vnd.apple.mpegurl").send(rewriteM3u8PlaylistWithProxy(playlist, url, phimApiHlsProxyUrl));
+        return true;
+      } catch {
+        continue;
+      }
+    }
+
+    return false;
   };
 
   const sendHhkungfuDirectFallback = async () => {
