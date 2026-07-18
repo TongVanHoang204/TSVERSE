@@ -22,17 +22,21 @@ const DEFAULT_IMAGE_CDN = import.meta.env.VITE_IMAGE_CDN_BASE_URL || "https://ph
 const BLOCKED_TAXONOMY_SLUGS = new Set(["phim-18", "phim-18+", "18", "18-plus", "mien-tay", "tre-em"]);
 const BLOCKED_TAXONOMY_NAMES = ["18+", "Miền Tây", "Trẻ Em"];
 
+function backendUrl(url?: string) {
+  if (!url || !API_BASE_URL || url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
 function absoluteImageUrl(url?: string, cdn = DEFAULT_IMAGE_CDN) {
   if (!url) return url;
+  if (url.startsWith("/api/image-proxy")) return backendUrl(url) || url;
+  if (/animehay\d*\.site|animehay\.(zip|cam)/i.test(url)) {
+    return backendUrl(`/api/image-proxy?url=${encodeURIComponent(url)}`) || url;
+  }
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   if (/^[\w.-]+\//.test(url)) return `https://${url}`;
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   return `${cdn}${cleanUrl}`;
-}
-
-function backendUrl(url?: string) {
-  if (!url || !API_BASE_URL || url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
 function normalizeEpisode(episode: EpisodeItem): EpisodeItem {

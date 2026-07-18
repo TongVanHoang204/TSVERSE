@@ -1785,6 +1785,12 @@ function animehayAbsoluteUrl(value = "") {
   return value.startsWith("http") ? value.replace(/([^:]\/)\/+/g, "$1") : String(animehayUrl(value)).replace(/([^:]\/)\/+/g, "$1");
 }
 
+function animehayImageUrl(value = "") {
+  const abs = animehayAbsoluteUrl(value);
+  if (!abs) return "";
+  return `/api/image-proxy?url=${encodeURIComponent(abs)}`;
+}
+
 function animehayWatchPathFromUrl(value: string) {
   const url = value.startsWith("http") ? new URL(value) : animehayUrl(value);
   return `${url.pathname}${url.search}`;
@@ -1889,8 +1895,8 @@ function normalizeAnimehayCard(block: string) {
     name: decodeHtml(stripHtml(title)),
     origin_name: "",
     slug: animehayInternalSlug(rawSlug, movieId),
-    poster_url: animehayAbsoluteUrl(image),
-    thumb_url: animehayAbsoluteUrl(image),
+    poster_url: animehayImageUrl(image),
+    thumb_url: animehayImageUrl(image),
     year: undefined,
     quality: "HD",
     episode_current: decodeHtml(stripHtml(episode)),
@@ -2039,8 +2045,8 @@ function normalizeAnimehayDetail(html: string, rawSlug: string, movieId: string)
     name: decodeHtml(stripHtml(title)) || rawSlug,
     origin_name: decodeHtml(stripHtml(originTitle)),
     slug: animehayInternalSlug(rawSlug, movieId),
-    poster_url: animehayAbsoluteUrl(poster),
-    thumb_url: animehayAbsoluteUrl(poster),
+    poster_url: animehayImageUrl(poster),
+    thumb_url: animehayImageUrl(poster),
     year: Number.isFinite(year) ? year : undefined,
     quality: "HD",
     episode_current: episodes[0]?.name || "",
@@ -3265,6 +3271,43 @@ app.get("/api/phimapi/hls-proxy", async (request, response) => {
     response.type(contentType || "application/octet-stream").send(bytes);
   } catch (error) {
     response.status(502).type("text/plain").send(errorDetail(error) || "Cannot proxy PhimAPI media");
+  }
+});
+
+app.get("/api/image-proxy", async (request, response) => {
+  const imageUrl = String(request.query.url || "");
+  if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
+    response.status(400).type("text/plain").send("Invalid image URL");
+    return;
+  }
+
+  try {
+    const parsed = new URL(imageUrl);
+    if (!/(^|\.)(animehay\d*\.site|animehay\.(zip|cam)|hhkungfu\.(ee|tv)|phim1280\.(tv|com)|kkphimplayer\d*\.com|opstream\d*\.com|hhpanda\.st|hh3d\.io|phimimg\.com)$/i.test(parsed.hostname)) {
+      response.status(403).type("text/plain").send("Blocked image host");
+      return;
+    }
+
+    const referer = parsed.hostname.includes("animehay") ? animehayBaseUrl : parsed.hostname.includes("hhkungfu") ? hhkungfuBaseUrl : undefined;
+    const res = await fetch(imageUrl, {
+      headers: {
+        accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        ...(referer ? { referer } : {}),
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+    });
+
+    if (!res.ok) {
+      response.status(res.status).type("text/plain").send("Image fetch failed");
+      return;
+    }
+
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    const bytes = Buffer.from(await res.arrayBuffer());
+    response.setHeader("cache-control", "public, max-age=86400, s-maxage=86400");
+    response.type(contentType).send(bytes);
+  } catch (error) {
+    response.status(502).type("text/plain").send("Failed to proxy image");
   }
 });
 
