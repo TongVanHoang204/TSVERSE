@@ -1,48 +1,85 @@
-import sys
-import os
-import subprocess
-from playwright.sync_api import sync_playwright
+"""
+Công cụ cuối cùng để lấy video từ streamfree.vip.
+Sử dụng nodriver (Chrome thật, ẩn automation) để vượt tường Access Denied,
+tự động bắt link video hoặc blob.
 
-def download_video(target_url):
-    m3u8_url = None
-    headers_dict = {}
+Cài đặt một lần duy nhất:
+    pip install nodriver yt-dlp
+    python -m nodriver install    # Cài Chrome ẩn danh
 
-    def handle_response(response):
-        nonlocal m3u8_url, headers_dict
-        if ".m3u8" in response.url and response.request.method == "GET":
-            print(f"[FOUND HLS] {response.url}")
-            m3u8_url = response.url
-            headers = response.request.headers
-            referer = headers.get("referer", "")
-            user_agent = headers.get("user-agent", "")
-            
-            headers_dict['Referer'] = referer
-            headers_dict['User-Agent'] = user_agent
+Chạy: python lay_video_nodriver.py
+"""
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+import asyncio
+import base64
+import re
+import yt_dlp
 
-        page.on("response", handle_response)
-        print(f"[NAVIGATING] {target_url}")
-        
-        try:
-            page.goto(target_url, wait_until="networkidle")
-            page.wait_for_timeout(10000)
-            page.screenshot(path="screenshot.png")
-            print("[SCREENSHOT SAVED]")
-        except Exception as e:
-            print(f"[ERROR] {e}")
-        finally:
-            browser.close()
+EMBED_URL = "https://streamfree.vip/embed/v/jmAzrEHD"
+OUTPUT = "video.mp4"
 
-    if m3u8_url:
-        print(f"[M3U8 URL] {m3u8_url}")
-        print(f"[HEADERS] {headers_dict}")
+async def main():
+    # Khởi tạo trình duyệt nodriver (chế độ ẩn, chống phát hiện tự động)
+    from nodriver import start
+    browser = await start(headless=False)  # headless=False để bạn giải captcha nếu có
+    page = await browser.get(EMBED_URL)
+
+    print("[*] Đã mở trang. Nếu cần giải captcha, hãy làm và chờ video phát.")
+    print("[*] Nhấn Enter sau khi video bắt đầu chạy (có thể tua nhanh để chắc chắn)...")
+    input()
+
+    # Phương án 1: Tìm request mạng có .m3u8 / .mp4
+    video_links = set()
+    async def log_request(event):
+        req = event.request
+        if re.search(r'\.(m3u8|mp4)(\?|$)', req.url):
+            video_links.add(req.url)
+    page.add_handler(log_request, 'Network.requestWillBeSent')
+
+    # Reload trang để bắt request (sau khi đã có cookie/captcha)
+    await page.reload()
+    await asyncio.sleep(5)
+
+    if video_links:
+        link = sorted(video_links)[0]
+        print(f"[+] Bắt được link: {link}")
+        ydl_opts = {'outtmpl': OUTPUT, 'format': 'best', 'merge_output_format': 'mp4', 'quiet': False}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([link])
+        print(f"[+] Đã lưu {OUTPUT}")
     else:
-        print("[NOT FOUND]")
+        # Phương án 2: Lấy blob từ thẻ video
+        print("[*] Không thấy request mạng, thử trích xuất blob...")
+        blob_url = await page.evaluate('''
+            () => {
+                const v = document.querySelector('video');
+                return v ? v.src : null;
+            }
+        ''')
+        if blob_url and blob_url.startswith('blob:'):
+            data_b64 = await page.evaluate('''
+                async (blobUrl) => {
+                    const resp = await fetch(blobUrl);
+                    const blob = await resp.blob();
+                    return new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                }
+            ''', blob_url)
+            if data_b64 and ',' in data_b64:
+                _, encoded = data_b64.split(',', 1)
+                video_bytes = base64.b64decode(encoded)
+                with open(OUTPUT, 'wb') as f:
+                    f.write(video_bytes)
+                print(f"[+] Đã lưu video từ blob vào {OUTPUT}")
+            else:
+                print("[-] Không decode được blob.")
+        else:
+            print("[-] Không tìm thấy video. Trang có thể dùng DRM không thể tải.")
 
-if __name__ == "__main__":
-    url = "https://hhkungfu.ee/watch-gia-thien/tap-162-sv1.html"
-    download_video(url)
+    await browser.stop()
+
+if __name__ == '__main__':
+    asyncio.run(main())

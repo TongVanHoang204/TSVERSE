@@ -17,7 +17,7 @@ const oPhimBaseUrl = process.env.OPHIM_BASE_URL || "https://ophim1.com";
 const hhpandaBaseUrl = process.env.HHPANDA_BASE_URL || "https://hhpanda.st";
 const hh3dBaseUrl = process.env.HH3D_BASE_URL || "https://hh3d.io";
 const hhkungfuBaseUrl = process.env.HHKUNGFU_BASE_URL || "https://hhkungfu.ee";
-const animehayBaseUrl = process.env.ANIMEHAY_BASE_URL || "https://animehay03.site";
+const animehayBaseUrl = process.env.ANIMEHAY_BASE_URL || "https://animehay07.site";
 const outboundProxyUrl = process.env.OUTBOUND_PROXY_URL || "";
 const rawStreamExtractorUrl = (process.env.STREAM_EXTRACTOR_URL || process.env.SCRAPER_SERVICE_URL || "").trim();
 const streamExtractorUrl = rawStreamExtractorUrl ? (/^https?:\/\//i.test(rawStreamExtractorUrl) ? rawStreamExtractorUrl : `https://${rawStreamExtractorUrl}`).replace(/\/+$/, "") : "";
@@ -1007,6 +1007,24 @@ function unpackStreamfreeJs(html: string) {
   return "";
 }
 
+function normalizeMatchText(value = "") {
+  return decodeHtml(stripHtml(value))
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function episodeNoFromText(value = "") {
+  const normalized = normalizeMatchText(value);
+  const match = normalized.match(/(?:tap|ep|episode)\s*(\d+(?:\.\d+)?)/i) || normalized.match(/\b(\d+(?:\.\d+)?)\b/);
+  return match?.[1] || "";
+}
+
 function episodeNumberFromChapter(chapter: string) {
   return episodeNoFromText(chapter) || chapter.replace(/\D+/g, "");
 }
@@ -1429,48 +1447,18 @@ async function fetchHhkungfuLatestPosts(page: number, limit: number) {
   });
 }
 
-function slugFromHhkungfuUrl(url: string) {
-  const pathname = new URL(url).pathname;
-  return pathname.split("/").filter(Boolean)[0] || "";
-}
-
-function hhkungfuLatestPagePath(page: number) {
-  return page > 1 ? `/moi-cap-nhat/page/${page}` : "/moi-cap-nhat";
-}
-
-function hhkungfuPopularPagePath(page: number) {
-  return page > 1 ? `/top-xem-nhieu/page/${page}` : "/top-xem-nhieu";
-}
-
-function parseHhkungfuPagination(html: string, currentPage: number, itemCount: number) {
-  const pages = Array.from(html.matchAll(/class=["'][^"']*page-numbers[^"']*["'][^>]*>(\d+)<\/a>/gi))
-    .map((match) => Number(match[1]))
-    .filter(Number.isFinite);
-  const totalPages = Math.max(currentPage, ...pages, 1);
-
-  return {
-    totalItems: totalPages * itemCount,
-    totalItemsPerPage: itemCount,
-    currentPage,
-    totalPages,
-  };
-}
-
-function normalizeMatchText(value = "") {
-  return decodeHtml(stripHtml(value))
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\u0111/g, "d")
-    .replace(/\u0110/g, "D")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+function cleanMatchTitle(value = "") {
+  return normalizeMatchText(value)
+    .replace(/\b(ova|ova\d+|special|movie|phan\s*\d+|season\s*\d+|ss\d+|vietsub|thuyet\s*minh)\b.*$/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function tokenSimilarity(left = "", right = "") {
-  const leftTokens = new Set(normalizeMatchText(left).split(" ").filter(Boolean));
-  const rightTokens = new Set(normalizeMatchText(right).split(" ").filter(Boolean));
+  const leftClean = cleanMatchTitle(left);
+  const rightClean = cleanMatchTitle(right);
+  const leftTokens = new Set(leftClean.split(" ").filter(Boolean));
+  const rightTokens = new Set(rightClean.split(" ").filter(Boolean));
   if (!leftTokens.size || !rightTokens.size) return 0;
 
   let overlap = 0;
@@ -1478,7 +1466,7 @@ function tokenSimilarity(left = "", right = "") {
     if (rightTokens.has(token)) overlap += 1;
   }
 
-  return overlap / Math.max(leftTokens.size, rightTokens.size);
+  return overlap / Math.min(leftTokens.size, rightTokens.size);
 }
 
 function isConfidentMovieMatch(source: { name?: string; origin_name?: string; slug?: string }, candidate?: PhimApiMovie) {
@@ -1492,13 +1480,10 @@ function isConfidentMovieMatch(source: { name?: string; origin_name?: string; sl
 
   if (sourceName && candidateName && sourceName === candidateName) return true;
   if (sourceOrigin && candidateOrigin && sourceOrigin === candidateOrigin) return true;
-  return tokenSimilarity(source.name, candidate.name) >= 0.9 || (!!sourceOrigin && tokenSimilarity(source.origin_name, candidate.origin_name) >= 0.9);
-}
 
-function episodeNoFromText(value = "") {
-  const normalized = normalizeMatchText(value);
-  const match = normalized.match(/(?:tap|ep|episode)\s*(\d+(?:\.\d+)?)/i) || normalized.match(/\b(\d+(?:\.\d+)?)\b/);
-  return match?.[1] || "";
+  const simName = tokenSimilarity(source.name, candidate.name);
+  const simOrigin = sourceOrigin ? tokenSimilarity(source.origin_name, candidate.origin_name) : 0;
+  return simName >= 0.7 || simOrigin >= 0.7;
 }
 
 function isSameEpisode(sourceChapter: string, candidate: PhimApiEpisodeItem) {
@@ -1593,58 +1578,18 @@ async function resolveMovieApiDetailCandidatesForHhkungfuPost(post: HhpandaPost,
 
   await addDetailBySlug(sourceMovie.slug);
 
-  const keywords = [sourceMovie.name, sourceMovie.origin_name].filter(Boolean);
+  const keywords = Array.from(new Set([sourceMovie.name, cleanMatchTitle(sourceMovie.name), sourceMovie.origin_name].filter((k) => k && k.trim().length >= 3)));
   for (const keyword of keywords) {
+    if (details.length > 0) break;
     const candidates = await searchMovieApiCandidates(keyword, baseUrl);
     for (const candidate of candidates) {
       if (!isConfidentMovieMatch(sourceMovie, candidate)) continue;
       await addDetailBySlug(candidate.slug);
+      if (details.length > 0) break;
     }
   }
 
   return details;
-}
-
-async function resolvePhimApiDetailForHhkungfuPost(post: HhpandaPost) {
-  const sourceMovie = normalizeHhkungfuPost(post);
-  const direct = await fetchPhimApiDetailBySlug(sourceMovie.slug);
-  if (direct?.movie && isConfidentMovieMatch(sourceMovie, direct.movie)) return direct;
-
-  const keywords = [sourceMovie.name, sourceMovie.origin_name].filter(Boolean);
-  const seenSlugs = new Set<string>();
-  for (const keyword of keywords) {
-    const candidates = await searchPhimApiCandidates(keyword);
-    for (const candidate of candidates) {
-      if (!candidate.slug || seenSlugs.has(candidate.slug)) continue;
-      seenSlugs.add(candidate.slug);
-      if (!isConfidentMovieMatch(sourceMovie, candidate)) continue;
-      const detail = await fetchPhimApiDetailBySlug(candidate.slug);
-      if (detail?.movie && isConfidentMovieMatch(sourceMovie, detail.movie)) return detail;
-    }
-  }
-
-  return null;
-}
-
-async function resolveMovieApiDetailForHhkungfuPost(post: HhpandaPost, baseUrl: string) {
-  const sourceMovie = normalizeHhkungfuPost(post);
-  const direct = await fetchMovieApiDetailBySlug(sourceMovie.slug, baseUrl);
-  if (direct?.movie && isConfidentMovieMatch(sourceMovie, direct.movie)) return direct;
-
-  const keywords = [sourceMovie.name, sourceMovie.origin_name].filter(Boolean);
-  const seenSlugs = new Set<string>();
-  for (const keyword of keywords) {
-    const candidates = await searchMovieApiCandidates(keyword, baseUrl);
-    for (const candidate of candidates) {
-      if (!candidate.slug || seenSlugs.has(candidate.slug)) continue;
-      seenSlugs.add(candidate.slug);
-      if (!isConfidentMovieMatch(sourceMovie, candidate)) continue;
-      const detail = await fetchMovieApiDetailBySlug(candidate.slug, baseUrl);
-      if (detail?.movie && isConfidentMovieMatch(sourceMovie, detail.movie)) return detail;
-    }
-  }
-
-  return null;
 }
 
 async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: string }) {
@@ -1662,7 +1607,10 @@ async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: str
       if (!detail.episodes?.length) continue;
 
       for (const server of preferredPhimApiServers(detail.episodes)) {
-        for (const item of server.server_data || []) {
+        const data = server.server_data || [];
+        if (!data.length) continue;
+
+        for (const item of data) {
           if (!item.link_m3u8 || !isSameEpisode(episode.chapter, item)) continue;
           return {
             source: source.name,
@@ -1671,11 +1619,49 @@ async function resolveHhkungfuPhimApiHls(episode: { postId: string; chapter: str
             episode: item,
           };
         }
+
+        const isSpecialChapter = /full|ova|movie|dac-biet|dacbiet|spec/i.test(episode.chapter);
+        const fallbackItem = isSpecialChapter ? data[data.length - 1] : data[0];
+        if (fallbackItem?.link_m3u8) {
+          return {
+            source: source.name,
+            movie: detail.movie,
+            server_name: server.server_name || source.name,
+            episode: fallbackItem,
+          };
+        }
       }
     }
   }
 
   return null;
+}
+
+function slugFromHhkungfuUrl(url: string) {
+  const pathname = new URL(url).pathname;
+  return pathname.split("/").filter(Boolean)[0] || "";
+}
+
+function hhkungfuLatestPagePath(page: number) {
+  return page > 1 ? `/moi-cap-nhat/page/${page}` : "/moi-cap-nhat";
+}
+
+function hhkungfuPopularPagePath(page: number) {
+  return page > 1 ? `/top-xem-nhieu/page/${page}` : "/top-xem-nhieu";
+}
+
+function parseHhkungfuPagination(html: string, currentPage: number, itemCount: number) {
+  const pages = Array.from(html.matchAll(/class=["'][^"']*page-numbers[^"']*["'][^>]*>(\d+)<\/a>/gi))
+    .map((match) => Number(match[1]))
+    .filter(Number.isFinite);
+  const totalPages = Math.max(currentPage, ...pages, 1);
+
+  return {
+    totalItems: totalPages * itemCount,
+    totalItemsPerPage: itemCount,
+    currentPage,
+    totalPages,
+  };
 }
 
 function parseHhkungfuLatestMovies(html: string, limit = 24) {
