@@ -2106,7 +2106,12 @@ function assertAllowedAnimehayMediaUrl(value: string) {
 
 function assertAllowedPhimApiMediaUrl(value: string) {
   const url = new URL(value);
-  if (!/(^|\.)kkphimplayer\d*\.com$/i.test(url.hostname) && !/(^|\.)opstream\d*\.com$/i.test(url.hostname)) {
+  if (
+    !/(^|\.)kkphimplayer\d*\.com$/i.test(url.hostname) &&
+    !/(^|\.)opstream\d*\.com$/i.test(url.hostname) &&
+    !/(^|\.)phim1280\.(tv|com)$/i.test(url.hostname) &&
+    !/(^|\.)phim\d*\.(tv|com)$/i.test(url.hostname)
+  ) {
     throw new Error("Blocked PhimAPI media host");
   }
   return url;
@@ -2114,7 +2119,13 @@ function assertAllowedPhimApiMediaUrl(value: string) {
 
 function assertAllowedHhkungfuDirectMediaUrl(value: string) {
   const url = new URL(value);
-  if (url.hostname !== "streamfree.vip" && !/(^|\.)kkphimplayer\d*\.com$/i.test(url.hostname) && !/(^|\.)opstream\d*\.com$/i.test(url.hostname)) {
+  if (
+    url.hostname !== "streamfree.vip" &&
+    !/(^|\.)kkphimplayer\d*\.com$/i.test(url.hostname) &&
+    !/(^|\.)opstream\d*\.com$/i.test(url.hostname) &&
+    !/(^|\.)phim1280\.(tv|com)$/i.test(url.hostname) &&
+    !/(^|\.)phim\d*\.(tv|com)$/i.test(url.hostname)
+  ) {
     throw new Error("Blocked HHKungfu direct media host");
   }
   return url;
