@@ -4,7 +4,7 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.ts": {
-      "includeFiles": "backend/dist/**",
+      "includeFiles": "{backend/src/**,backend/dist/**}",
       "excludeFiles": "{**/node_modules/playwright/**,**/node_modules/playwright-core/**}"
     }
   },
